@@ -1,0 +1,389 @@
+---
+title: "Cubs Analysis: Pre vs Post All-Star Break"
+author: "Elliot Maringer"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(scales)
+```
+
+## Introduction
+
+  After a disappointing finish to the 2024 season, the Chicago Cubs entered 2025 with high expectations and a determination to contend. The team started the season red-hot, fueled by the emergence of second-year outfielder Pete Crow-Armstrong, the major free-agent acquisition of Kyle Tucker from the Astros, and a power surge from Seiya Suzuki, who began to prove himself as a true middle-of-the-lineup threat.
+  
+Despite early-season injuries to starting pitchers Justin Steele and Shota Imanaga, the Cubs remained competitive. By June, they were not only leading the NL Central but also battling for the best record in the National League. Heading into the All-Star break, the Cubs had established themselves as one of the top teams in baseball — boasting the most productive offense in the league and consistently winning games in spite of their depleted pitching staff. With Imanaga returning and veteran Matthew Boyd pitching like an ace, the Cubs looked poised to make a strong second-half push toward the postseason and potentially the World Series.
+
+However, since the All-Star break, the Cubs have looked like a completely different team. Just a month after leading the National League, they now find themselves six games back in their division and clinging to a potential Wild Card spot. In this report, we’ll break down what happened — comparing pre- and post-All-Star performance, digging into team-level metrics, and spotlighting key players — to understand how a once-dominant Cubs team began to unravel.
+
+```{r data, echo=FALSE, message=FALSE, warning=FALSE}
+cubs_splits_halves <- read.csv("data/CubsHalvesTeamSplits.csv")
+cubs_splits_months <- read.csv("data/CubsMonthsTeamSplits.csv")
+cubs_batting_totals <- read.csv("data/CubsTeamBatting.csv")
+cubs_box_score <- read.csv("data/CubsSeasonBoxScore.csv")
+pca_halves <- read.csv("data/Crow-ArmstrongHalvesBatting.csv")
+pca_months <- read.csv("data/Crow-ArmstrongMonthsBatting.csv")
+suzuki_halves <- read.csv("data/SuzukiHalvesBatting.csv")
+suzuki_months <- read.csv("data/SuzukiMonthsBatting.csv")
+tucker_halves <- read.csv("data/TuckerHalvesBatting.csv")
+tucker_months <- read.csv("data/TuckerMonthsBatting.csv")
+```
+## Chicago Cubs Overview
+
+  The Chicago Cubs entered the 2025 season with high expectations after a disappointing end to 2024. They made a strong statement early, posting a team batting average of .263 and launching 42 home runs in the first month alone. Much of this early success came from the power trio of Pete Crow-Armstrong, Kyle Tucker, and Seiya Suzuki, who collectively accounted for half of those home runs. Their offensive firepower quickly propelled the Cubs to the top of the National League standings.
+
+However, the momentum slowed after Shota Imanaga suffered a hamstring injury, leading to a brief skid in the Cubs' win-loss column. Despite the setback, the team bounced back in June, notching 45 home runs—their highest monthly total—even while playing five fewer games than they had in April. Pete Crow-Armstrong (PCA) was making a legitimate MVP case by midseason, becoming a 20 HR / 20 SB player and routinely making highlight-reel plays in center field.
+
+By the end of June, the Cubs held a 50-35 record, poised for a deep postseason run. However, as the season transitioned into July, the team's performance began to unravel.
+
+## Monthly Performance Trend
+
+  The first figure below illustrates the Cubs’ Games Above .500 throughout the season. The team's steady climb through the first 90 games is clearly visible. However, following the All-Star break (Game 96), there is a noticeable plateau and eventual decline. This trend highlights how the Cubs shifted from a top-tier contender to a team now battling to remain in the playoff picture.
+
+```{r RecordPlot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
+cubs_box_score <- cubs_box_score %>%
+  mutate(
+    WL_Clean = gsub("-wo", "", `W.L`),  
+    Result = case_when(
+      WL_Clean == "W" ~ 1,
+      WL_Clean == "L" ~ -1,
+      TRUE ~ 0
+    ),
+    GamesAbove500 = cumsum(Result)
+  )
+
+
+ggplot(cubs_box_score, aes(x = `Gm.`, y = GamesAbove500)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_smooth(method = "loess", se = FALSE, color = "orange", size = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = 96, linetype = "dotted", color = "red", linewidth = 1) +
+  annotate("text", x = 96, y = max(cubs_box_score$GamesAbove500, na.rm = TRUE), 
+           label = "All-Star Break", vjust = -0.5, hjust = -0.1, color = "red", size = 3.5) +
+  labs(
+    title = "Chicago Cubs Games Above .500 (2025)",
+    x = "Game Number",
+    y = "Games Above .500"
+  ) +
+  theme_minimal()
+```
+
+The chart above shows how the Cubs steadily climbed above .500 through the first half of the season. After the All-Star break (indicated by the red dashed line), their performance plateaued and eventually declined, mirroring their offensive regression.
+
+## Pre vs Post All-Star Batting Comparison
+  The upcoming graphics presents a comparison of key batting metrics—Batting Average (BA), Home Runs per Game, OPS, and Runs per Game—before and after the All-Star break. Each of these metrics shows a notable decline in the second half of the season. For example, Runs per Game dropped by over 22%, and OPS fell by 8%, indicating a broader regression in offensive output. This side-by-side comparison helps quantify the team's second-half struggles and contextualizes their recent fall in the standings.
+```{r Team Halves Batting Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+cubs_halves_plot <- cubs_splits_halves %>%
+  mutate(
+    HR_per_game = HR / G,
+    Runs_per_game = R / G,
+    Split = factor(Split, levels = c("1st Half", "2nd Half"))
+  ) %>%
+  select(Split, BA, OPS, HR_per_game, Runs_per_game) %>%
+  pivot_longer(-Split, names_to = "Metric", values_to = "Value")
+
+percent_changes <- cubs_halves_plot %>%
+  pivot_wider(names_from = Split, values_from = Value) %>%
+  mutate(
+    pct_change = (`2nd Half` - `1st Half`) / `1st Half` * 100,
+    max_value = pmax(`1st Half`, `2nd Half`)
+  )
+
+ggplot(cubs_halves_plot, aes(x = Metric, y = Value, fill = Split)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
+  geom_text(
+    data = percent_changes,
+    aes(
+      x = Metric,
+      y = max_value + 0.02,
+      label = paste0(round(pct_change, 1), "%"),
+    ),
+    inherit.aes = FALSE,
+    vjust = 0,
+    size = 4,
+    color = "red"
+  ) +
+  labs(
+    title = "Cubs Batting Metrics: Pre vs Post All-Star Break",
+    x = "Metric",
+    y = "Value",
+    fill = "Season Half"
+  ) +
+  scale_fill_manual(values = c("1st Half" = "#0072B2", "2nd Half" = "#D55E00")) +
+  theme_minimal()
+```
+
+This bar chart quantifies how far the offense has fallen. Batting average and OPS have both declined post-All-Star break, but the biggest drop is seen in runs per game and home runs per game, both down 20%, which the cubs relied on heavily at the beginning of the season. The plot below outlines the cubs batting statistics for key offensive metrics over each month of the 2025 season. As shown in the figure we can see declines in all aspects of their offense right around the all-star break.
+
+```{r Team Months Batting Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+# Create metrics
+cubs_splits_months <- cubs_splits_months %>%
+  mutate(
+    HR_per_game = HR / G,
+    Runs_per_game = R / G,
+    Split = factor(Split, levels = c("April/March", "May", "June", "July", "August"))  # Make sure "Split" is correctly ordered
+  )
+
+# Reshape data for plotting
+month_plot <- cubs_splits_months %>%
+  select(Split, BA, OPS, HR_per_game, Runs_per_game) %>%
+  pivot_longer(-Split, names_to = "Metric", values_to = "Value")
+
+# Create plot
+ggplot(month_plot, aes(x = Split, y = Value, color = Metric, group = Metric)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
+  geom_vline(xintercept = 4.2, linetype = "dashed", color = "red") +  # Between June & July
+  annotate("text", x = 4.6, y = max(month_plot$Value, na.rm = TRUE), label = "All-Star Break", color = "red", hjust = 0) +
+  labs(
+    title = "Cubs Monthly Batting Trends (2025)",
+    y = "Per-Game / Rate Metric",
+    x = ""
+  ) +
+  theme_minimal()
+
+
+```
+
+## Player Spotlight: Pete Crow-Armstrong 
+
+  Pete Crow-Armstrong (PCA) emerged as one of the brightest stars of the Cubs' 2025 season. By the All-Star break, he had already crossed the 20 HR / 20 SB milestone and was putting together one of the most dynamic seasons in the league. Known for his elite defense and explosive athleticism, PCA became an everyday highlight in center field and a reliable top-of-the-order bat. The charts and tables below explore how his offensive production evolved over time, particularly before and after the All-Star break.
+
+
+```{r PCA Stats Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+
+# Compute derived metrics and format
+pca_halves_plot <- pca_halves %>%
+  mutate(
+    HR_per_game = HR / G,
+    RBI_per_game = RBI / G,
+    AVG = H / AB,
+    OPS = OPS,  # Assuming already present
+    Split = factor(Split, levels = c("1st Half", "2nd Half"))
+  ) %>%
+  select(Split, AVG, OPS, HR_per_game, RBI_per_game) %>%
+  pivot_longer(-Split, names_to = "Metric", values_to = "Value")
+
+# Calculate percent changes
+pca_percent_changes <- pca_halves_plot %>%
+  pivot_wider(names_from = Split, values_from = Value) %>%
+  mutate(
+    pct_change = (`2nd Half` - `1st Half`) / `1st Half` * 100,
+    max_value = pmax(`1st Half`, `2nd Half`)
+  )
+
+# Plot
+ggplot(pca_halves_plot, aes(x = Metric, y = Value, fill = Split)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
+  geom_text(
+    data = pca_percent_changes,
+    aes(
+      x = Metric,
+      y = max_value + 0.02,
+      label = paste0(round(pct_change, 1), "%")
+    ),
+    inherit.aes = FALSE,
+    vjust = 0,
+    size = 4,
+    color = "red"
+  ) +
+  labs(
+    title = "Pete Crow-Armstrong – Pre vs Post All-Star Metrics",
+    x = "Metric",
+    y = "Value",
+    fill = "Season Half"
+  ) +
+  scale_fill_manual(values = c("1st Half" = "#0072B2", "2nd Half" = "#D55E00")) +
+  theme_minimal()
+
+```
+
+Pete Crow-Armstrong took the league by storm in the first half of the 2025 season, delivering a balanced offensive attack with power, speed, and run production. However, the second half has painted a different picture. As shown in the chart above, PCA’s performance has dipped across every key offensive metric. Most notably, his home runs per game dropped by a staggering 62%, and his RBIs per game fell by over 53%. This dramatic decrease in run production has had a direct impact on the Cubs' ability to win close games. While his batting average and OPS also saw moderate declines, it’s the drop in power output that stands out. For a player expected to drive in runs from the top or middle of the lineup, this decline raises questions about fatigue, pitch selection, or possible mechanical issues that may be affecting his swing in the latter half of the season.
+
+```{r PCA Strikeouts, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+
+
+pca_months <- pca_months %>%
+  mutate(
+    K_per_game = SO / G,
+    Month = factor(Split, levels = c("March/April", "May", "June", "July", "August"))
+  )
+
+pca_months <- pca_months %>% 
+  filter(!is.na(Month))
+
+ggplot(pca_months, aes(x = Month, y = K_per_game, group = 1)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_point(size = 3, color = "blue") +
+  labs(
+    title = "PCA Strikeouts per Game by Month",
+    y = "Strikeouts per Game",
+    x = "Month"
+  ) +
+  theme_minimal()
+```
+
+Pete Crow-Armstrong began the season striking out at a relatively high rate — a common trend for players adjusting early in the year as they work to find their rhythm at the plate. As the season progressed, however, PCA settled into form and displayed MVP-level performance, with his strikeouts per game dropping to under one while maintaining elite offensive production. Unfortunately, his performance has taken a sharp downturn in recent weeks. The number of strikeouts per game has spiked dramatically, signaling that he may be pressing at the plate or struggling to make adjustments. For a player who has been a key run producer for the Cubs, this lack of contact is particularly damaging to the team’s offensive potential and may help explain their broader second-half decline.
+
+# Player Spotlight: Kyle Tucker
+
+  Kyle Tucker entered the 2025 season as one of the most high-profile additions to the Cubs roster, acquired from the Houston Astros after three consecutive All-Star appearances. Known for his excellent plate discipline, consistent power, and high on-base and slugging percentages, Tucker brought both proven production and postseason experience to a team hungry for a deep playoff run. From early on he lived up to the hype, quickly earning the nickname “King Tuck” among Cubs fans thanks to his scorching start and clutch hitting. Like Pete Crow-Armstrong, Tucker was a major catalyst behind the Cubs’ early dominance in the National League. The charts below explore how Tucker’s offensive contributions shifted across the season, particularly in the lead-up to and aftermath of the All-Star break.
+
+```{r Tucker Stats Plot , echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+# Compute derived metrics and format
+tucker_halves_plot <- tucker_halves %>%
+  mutate(
+    HR_per_game = HR / G,
+    RBI_per_game = RBI / G,
+    AVG = H / AB,
+    OPS = OPS,  # Assuming already present
+    Split = factor(Split, levels = c("1st Half", "2nd Half"))
+  ) %>%
+  select(Split, AVG, OPS, HR_per_game, RBI_per_game) %>%
+  pivot_longer(-Split, names_to = "Metric", values_to = "Value")
+
+# Calculate percent changes
+tucker_percent_changes <- tucker_halves_plot %>%
+  pivot_wider(names_from = Split, values_from = Value) %>%
+  mutate(
+    pct_change = (`2nd Half` - `1st Half`) / `1st Half` * 100,
+    max_value = pmax(`1st Half`, `2nd Half`)
+  )
+
+# Plot
+ggplot(tucker_halves_plot, aes(x = Metric, y = Value, fill = Split)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
+  geom_text(
+    data = tucker_percent_changes,
+    aes(
+      x = Metric,
+      y = max_value + 0.02,
+      label = paste0(round(pct_change, 1), "%")
+    ),
+    inherit.aes = FALSE,
+    vjust = 0,
+    size = 4,
+    color = "red"
+  ) +
+  labs(
+    title = "Kyle Tucker – Pre vs Post All-Star Metrics",
+    x = "Metric",
+    y = "Value",
+    fill = "Season Half"
+  ) +
+  scale_fill_manual(values = c("1st Half" = "#0072B2", "2nd Half" = "#D55E00")) +
+  theme_minimal()
+```
+
+Kyle Tucker's second half of the season has been marked by a steep decline in nearly every key offensive category. Known for his elite OPS and consistent run production, Tucker saw his home runs per game plummet by over 70% and RBI per game nearly cut in half after the All-Star break. His OPS also dropped by 21.9%, a significant regression for a player whose value is rooted in his ability to get on base and slug. While his batting average saw a modest 20% dip, the loss of power and run production is especially concerning given his role as a middle-of-the-order anchor. The Cubs brought Tucker in to be a game-changer, and while he lived up to the billing early on, his second-half struggles have mirrored the team’s offensive downturn.
+
+```{r Tucker OBP Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+
+
+tucker_months <- tucker_months %>%
+  mutate(
+    Month = factor(Split, levels = c("March/April", "May", "June", "July", "August"))
+  )
+
+tucker_months <- tucker_months %>% 
+  filter(!is.na(Month))
+
+ggplot(tucker_months, aes(x = Month, y = OBP, group = 1)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_point(size = 3, color = "blue") +
+  labs(
+    title = "Kyle Tucker – Monthly On-Base Percentage (OBP)",
+    y = "OBP",
+    x = "Month"
+  ) +
+  theme_minimal()
+```
+
+One of the most alarming indicators of Kyle Tucker’s second-half slump is the steady decline in his on-base percentage (OBP). Historically one of the most consistent OBP producers in baseball — averaging .370 over the past five seasons — Tucker began 2025 on-brand, posting OBPs near or above .400 through May and June. However, since the All-Star break, his ability to reach base has deteriorated rapidly, with his OBP falling to just .280 in August. This sharp drop not only reflects a lack of hits but also a reduced walk rate and diminished plate discipline. For a player known for controlling the strike zone and setting the table for run production, this downward trend has had a ripple effect on the Cubs’ offensive engine.
+
+# Player Spotlight: Seiya Suzuki
+
+  Seiya Suzuki has been a steady contributor since joining the Cubs in 2022, coming off back-to-back seasons with 20+ home runs and 70+ RBIs. Known for his ability to drive the ball with authority and deliver in clutch situations, the Cubs entered the 2025 season hopeful that Suzuki would take the next step and emerge as a true middle-of-the-lineup force. He did not disappoint early on. Over the first three months of the season, Suzuki was on a tear — launching 22 home runs, driving in 69 RBIs, and slugging .540. His combination of power, plate presence, and run production made him one of the most dangerous hitters in the Cubs' lineup and a key reason for their early-season success.
+
+```{r Suzuki Halves Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+# Compute derived metrics and format
+suzuki_halves_plot <- suzuki_halves %>%
+  mutate(
+    HR_per_game = HR / G,
+    RBI_per_game = RBI / G,
+    AVG = H / AB,
+    OPS = OPS,  # Assuming already present
+    Split = factor(Split, levels = c("1st Half", "2nd Half"))
+  ) %>%
+  select(Split, AVG, OPS, HR_per_game, RBI_per_game) %>%
+  pivot_longer(-Split, names_to = "Metric", values_to = "Value")
+
+# Calculate percent changes
+suzuki_percent_changes <- suzuki_halves_plot %>%
+  pivot_wider(names_from = Split, values_from = Value) %>%
+  mutate(
+    pct_change = (`2nd Half` - `1st Half`) / `1st Half` * 100,
+    max_value = pmax(`1st Half`, `2nd Half`)
+  )
+
+# Plot
+ggplot(suzuki_halves_plot, aes(x = Metric, y = Value, fill = Split)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.7), width = 0.6) +
+  geom_text(
+    data = suzuki_percent_changes,
+    aes(
+      x = Metric,
+      y = max_value + 0.02,
+      label = paste0(round(pct_change, 1), "%")
+    ),
+    inherit.aes = FALSE,
+    vjust = 0,
+    size = 4,
+    color = "red"
+  ) +
+  labs(
+    title = "Seiya Suzuki – Pre vs Post All-Star Metrics",
+    x = "Metric",
+    y = "Value",
+    fill = "Season Half"
+  ) +
+  scale_fill_manual(values = c("1st Half" = "#0072B2", "2nd Half" = "#D55E00")) +
+  theme_minimal()
+```
+
+Seiya Suzuki's second half of the 2025 season has seen one of the most significant offensive drop-offs on the Cubs roster. After a dominant start that featured 22 home runs and 69 RBIs in just three months, Suzuki's power production collapsed post-All-Star break. His home runs per game fell by over 63%, while his RBI per game dropped by more than 58% — a troubling sign for a player whose role is to drive in runs. His OPS also declined nearly 28%, reflecting a broader struggle at the plate. While early-season Suzuki was a feared slugger in the heart of the lineup, his second-half numbers tell a different story — one of lost power and fading consistency. For the Cubs to regain their offensive spark, Suzuki will need to rediscover the swing that made him such a force in the first half.
+
+```{r Suzuki SLG Plot, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=3}
+
+
+suzuki_months <- suzuki_months %>%
+  mutate(
+    Month = factor(Split, levels = c("March/April", "May", "June", "July", "August"))
+  )
+
+suzuki_months <- suzuki_months %>% 
+  filter(!is.na(Month))
+
+ggplot(suzuki_months, aes(x = Month, y = SLG, group = 1)) +
+  geom_line(color = "blue", size = 1.2) +
+  geom_point(size = 3, color = "blue") +
+  labs(
+    title = "Seiya Suzuki – Monthly Slugging Percentage (SLG)",
+    y = "SLG",
+    x = "Month"
+  ) +
+  theme_minimal()
+```
+
+Seiya Suzuki’s offensive struggles began earlier than his fellow stars, as seen in the steady month-over-month decline in his slugging percentage. After posting a powerful .560 SLG in May, Suzuki's slugging fell sharply in June and bottomed out in July, signaling a loss of extra-base power that once anchored the middle of the Cubs' lineup. Unlike Pete Crow-Armstrong and Kyle Tucker, however, Suzuki appears to be showing signs of life in August, with a modest rebound in slugging percentage. While still far from his early-season form, this upward trend suggests he may be adjusting and regaining his timing at the plate — a positive sign for a Cubs offense in desperate need of power production down the stretch.
+
+## Conclusion
+
+  As the 2025 season enters its final stretch, the Chicago Cubs find themselves in a drastically different position than they were just a month ago. Once viewed as a legitimate World Series contender, the team now sits 7.5 games back in the National League Central and is clinging to a Wild Card spot by just 3.5 games. The most significant factor behind this steep decline has been the simultaneous regression of their three cornerstone hitters — Pete Crow-Armstrong, Kyle Tucker, and Seiya Suzuki. Each player began the season on a tear, powering one of the league’s most dangerous offenses, but their collective second-half slump has drained the Cubs’ offensive output and derailed the team’s momentum.
+
+Despite these struggles, the Cubs opted for a quiet trade deadline, acquiring only utility man Willi Castro and reliever Andrew Kittredge, who has posted an ERA over 10.00 since joining the team, albeit with an immaculate inning as a bright spot. Rather than make a bold move, the front office chose to bet on the roster that brought early success. So far, that gamble has not paid off. If there’s one area of optimism, it’s the starting rotation, which has been among the best in baseball since the All-Star break. But the question remains: can elite pitching alone keep this team afloat, or will the offensive collapse prove too much to overcome? With roughly 45 games left, the Cubs are running out of time to find answers.
